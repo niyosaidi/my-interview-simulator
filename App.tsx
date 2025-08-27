@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback, FormEvent } from 'react';
 import { InterviewState, type ChatMessage, type InterviewDetails } from './types';
 import * as geminiService from './services/geminiService';
@@ -16,9 +15,53 @@ const App: React.FC = () => {
     const [userInput, setUserInput] = useState('');
 
     const handleStartInterview = useCallback(async (interviewDetails: Omit<InterviewDetails, 'interviewerName'>) => {
+        setError(null); // Clear previous errors on a new attempt
+
+        const { companyName, companyUrl } = interviewDetails;
+
+        // Automatically prepend https:// if the protocol is missing
+        let fullUrl = companyUrl;
+        if (!/^https?:\/\//i.test(companyUrl)) {
+            fullUrl = `https://${companyUrl}`;
+        }
+
+        try {
+            const hostname = new URL(fullUrl).hostname.toLowerCase();
+            const companyWords = companyName.toLowerCase()
+                .replace(/[,.]/g, '') // remove commas and periods
+                .split(/\s+/)
+                // Filter out common business suffixes and articles
+                .filter(word => !['the', 'a', 'an', 'and', 'co', 'corp', 'corporation', 'inc', 'ltd', 'llc', '&'].includes(word) && word.length > 1);
+
+            if (companyWords.length === 0 && companyName.length > 0) {
+                setError("Please provide a more specific company name.");
+                return;
+            }
+
+            // Check 1: See if any significant word from the company name is in the URL's hostname.
+            const significantWordInUrl = companyWords.some(word => hostname.includes(word));
+            
+            // Check 2: Check for an acronym.
+            let acronymInUrl = false;
+            if (companyWords.length > 1) { // Only form acronyms for multi-word names
+                const acronym = companyWords.map(word => word[0]).join('');
+                if (acronym.length > 1) { // Only check for acronyms of 2 or more letters
+                    acronymInUrl = hostname.includes(acronym);
+                }
+            }
+
+            if (!significantWordInUrl && !acronymInUrl && companyWords.length > 0) {
+                setError("The company name doesn't seem to match the URL. Please double-check the company's homepage URL.");
+                return;
+            }
+        } catch (e) {
+            setError("The provided URL is not valid. Please enter a valid URL like 'https://company.com'.");
+            return;
+        }
+
         setIsLoading(true);
-        setError(null);
-        const fullDetails: InterviewDetails = { ...interviewDetails };
+        // Use the validated and potentially corrected URL
+        const fullDetails: InterviewDetails = { ...interviewDetails, companyUrl: fullUrl };
         setDetails(fullDetails);
         geminiService.startChatSession(fullDetails);
         const firstQuestion = await geminiService.getFirstQuestion(fullDetails);
